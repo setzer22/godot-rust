@@ -205,6 +205,16 @@ impl Mul<Vector3> for Quat {
     }
 }
 
+impl Mul<Quat> for Quat {
+    type Output = Quat;
+
+    #[inline]
+    fn mul(self, with: Quat) -> Quat {
+        debug_assert!(self.is_normalized(), "Quaternion is not normalized");
+        Quat::gd(self.glam() * with.glam())
+    }
+}
+
 impl Neg for Quat {
     type Output = Quat;
 
