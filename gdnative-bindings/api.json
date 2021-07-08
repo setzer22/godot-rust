@@ -110,7 +110,6 @@
 			"JOY_BUTTON_2": 2,
 			"JOY_BUTTON_20": 20,
 			"JOY_BUTTON_21": 21,
-			"JOY_BUTTON_22": 22,
 			"JOY_BUTTON_3": 3,
 			"JOY_BUTTON_4": 4,
 			"JOY_BUTTON_5": 5,
@@ -118,7 +117,7 @@
 			"JOY_BUTTON_7": 7,
 			"JOY_BUTTON_8": 8,
 			"JOY_BUTTON_9": 9,
-			"JOY_BUTTON_MAX": 23,
+			"JOY_BUTTON_MAX": 22,
 			"JOY_DPAD_DOWN": 13,
 			"JOY_DPAD_LEFT": 14,
 			"JOY_DPAD_RIGHT": 15,
@@ -127,22 +126,21 @@
 			"JOY_DS_B": 0,
 			"JOY_DS_X": 3,
 			"JOY_DS_Y": 2,
-			"JOY_GUIDE": 16,
 			"JOY_INVALID_OPTION": -1,
 			"JOY_L": 4,
 			"JOY_L2": 6,
 			"JOY_L3": 8,
-			"JOY_MISC1": 17,
+			"JOY_MISC1": 16,
 			"JOY_OCULUS_AX": 7,
 			"JOY_OCULUS_BY": 1,
 			"JOY_OCULUS_MENU": 3,
 			"JOY_OPENVR_MENU": 1,
 			"JOY_OPENVR_TOUCHPADX": 0,
 			"JOY_OPENVR_TOUCHPADY": 1,
-			"JOY_PADDLE1": 18,
-			"JOY_PADDLE2": 19,
-			"JOY_PADDLE3": 20,
-			"JOY_PADDLE4": 21,
+			"JOY_PADDLE1": 17,
+			"JOY_PADDLE2": 18,
+			"JOY_PADDLE3": 19,
+			"JOY_PADDLE4": 20,
 			"JOY_R": 5,
 			"JOY_R2": 7,
 			"JOY_R3": 9,
@@ -152,7 +150,7 @@
 			"JOY_SONY_TRIANGLE": 3,
 			"JOY_SONY_X": 0,
 			"JOY_START": 11,
-			"JOY_TOUCHPAD": 22,
+			"JOY_TOUCHPAD": 21,
 			"JOY_VR_ANALOG_GRIP": 4,
 			"JOY_VR_ANALOG_TRIGGER": 2,
 			"JOY_VR_GRIP": 2,
@@ -14558,25 +14556,6 @@
 				"has_varargs": false,
 				"is_from_script": false,
 				"arguments": [
-				]
-			},
-			{
-				"name": "teleport",
-				"return_type": "void",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": false,
-				"is_reverse": false,
-				"is_virtual": false,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-					{
-						"name": "to_node",
-						"type": "String",
-						"has_default_value": false,
-						"default_value": ""
-					}
 				]
 			},
 			{
@@ -44029,25 +44008,6 @@
 				]
 			},
 			{
-				"name": "_shape_changed",
-				"return_type": "void",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": false,
-				"is_reverse": false,
-				"is_virtual": true,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-					{
-						"name": "shape",
-						"type": "Shape",
-						"has_default_value": false,
-						"default_value": ""
-					}
-				]
-			},
-			{
 				"name": "_update_debug_shapes",
 				"return_type": "void",
 				"is_editor": false,
@@ -45434,6 +45394,19 @@
 		"signals": [
 		],
 		"methods": [
+			{
+				"name": "_shape_changed",
+				"return_type": "void",
+				"is_editor": false,
+				"is_noscript": false,
+				"is_const": false,
+				"is_reverse": false,
+				"is_virtual": true,
+				"has_varargs": false,
+				"is_from_script": false,
+				"arguments": [
+				]
+			},
 			{
 				"name": "get_shape",
 				"return_type": "Shape",
@@ -83731,13 +83704,6 @@
 				"index": -1
 			},
 			{
-				"name": "collider_rid",
-				"type": "RID",
-				"getter": "get_collider_rid",
-				"setter": "",
-				"index": -1
-			},
-			{
 				"name": "collider_shape",
 				"type": "Object",
 				"getter": "get_collider_shape",
@@ -83826,19 +83792,6 @@
 			{
 				"name": "get_collider_metadata",
 				"return_type": "Variant",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": true,
-				"is_reverse": false,
-				"is_virtual": false,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-				]
-			},
-			{
-				"name": "get_collider_rid",
-				"return_type": "RID",
 				"is_editor": false,
 				"is_noscript": false,
 				"is_const": true,
@@ -83990,13 +83943,6 @@
 				"index": -1
 			},
 			{
-				"name": "collider_rid",
-				"type": "RID",
-				"getter": "get_collider_rid",
-				"setter": "",
-				"index": -1
-			},
-			{
 				"name": "collider_shape",
 				"type": "Object",
 				"getter": "get_collider_shape",
@@ -84085,19 +84031,6 @@
 			{
 				"name": "get_collider_metadata",
 				"return_type": "Variant",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": true,
-				"is_reverse": false,
-				"is_virtual": false,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-				]
-			},
-			{
-				"name": "get_collider_rid",
-				"return_type": "RID",
 				"is_editor": false,
 				"is_noscript": false,
 				"is_const": true,
@@ -129683,13 +129616,13 @@
 				"arguments": [
 					{
 						"name": "id",
-						"type": "Variant",
+						"type": "void",
 						"has_default_value": false,
 						"default_value": ""
 					},
 					{
 						"name": "meta",
-						"type": "Variant",
+						"type": "void",
 						"has_default_value": false,
 						"default_value": ""
 					}
@@ -133502,19 +133435,6 @@
 		],
 		"methods": [
 			{
-				"name": "get_debug_mesh",
-				"return_type": "ArrayMesh",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": false,
-				"is_reverse": false,
-				"is_virtual": false,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-				]
-			},
-			{
 				"name": "get_margin",
 				"return_type": "float",
 				"is_editor": false,
@@ -134028,25 +133948,6 @@
 			},
 			{
 				"name": "get_bone_global_pose",
-				"return_type": "Transform",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": true,
-				"is_reverse": false,
-				"is_virtual": false,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-					{
-						"name": "bone_idx",
-						"type": "int",
-						"has_default_value": false,
-						"default_value": ""
-					}
-				]
-			},
-			{
-				"name": "get_bone_global_pose_no_override",
 				"return_type": "Transform",
 				"is_editor": false,
 				"is_noscript": false,
@@ -184140,13 +184041,6 @@
 		"constants": {
 		},
 		"properties": [
-			{
-				"name": "initialized",
-				"type": "bool",
-				"getter": "_is_initialized",
-				"setter": "_set_initialized",
-				"index": -1
-			}
 		],
 		"signals": [
 		],
@@ -184372,63 +184266,6 @@
 				"has_varargs": false,
 				"is_from_script": false,
 				"arguments": [
-				]
-			},
-			{
-				"name": "_is_initialized",
-				"return_type": "bool",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": false,
-				"is_reverse": false,
-				"is_virtual": true,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-				]
-			},
-			{
-				"name": "_set_initialized",
-				"return_type": "void",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": false,
-				"is_reverse": false,
-				"is_virtual": true,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-					{
-						"name": "enabled",
-						"type": "bool",
-						"has_default_value": false,
-						"default_value": ""
-					}
-				]
-			},
-			{
-				"name": "_set_input_port_default_value",
-				"return_type": "void",
-				"is_editor": false,
-				"is_noscript": false,
-				"is_const": false,
-				"is_reverse": false,
-				"is_virtual": true,
-				"has_varargs": false,
-				"is_from_script": false,
-				"arguments": [
-					{
-						"name": "port",
-						"type": "int",
-						"has_default_value": false,
-						"default_value": ""
-					},
-					{
-						"name": "value",
-						"type": "Variant",
-						"has_default_value": false,
-						"default_value": ""
-					}
 				]
 			}
 		],
