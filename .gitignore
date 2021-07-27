@@ -13,4 +13,4 @@ test/project/lib/*
 
 #os specific
 .DS_Store
-.import
+*.import
