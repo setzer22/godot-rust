@@ -1,10 +1,10 @@
 //! Utility functions and extension traits that depend on generated bindings
 
+use gdnative_core::export::NativeClass;
+use gdnative_core::object::ownership::Shared;
+use gdnative_core::object::{SubClass, TInstance, TRef};
+
 use super::generated::{Engine, Node, SceneTree};
-use gdnative_core::nativescript::{NativeClass, RefInstance};
-use gdnative_core::object::SubClass;
-use gdnative_core::thread_access::Shared;
-use gdnative_core::TRef;
 
 /// Convenience method  to obtain a reference to an "auto-load" node, that is a child of the root
 /// node. Returns `None` if the node does not exist or is not of the correct type.
@@ -58,7 +58,7 @@ pub trait NodeExt {
     /// invariants must be observed for the resulting node during `'a`, if any.
     ///
     /// [thread-safety]: https://docs.godotengine.org/en/stable/tutorials/threads/thread_safe_apis.html
-    unsafe fn get_node_as_instance<'a, T>(&self, path: &str) -> Option<RefInstance<'a, T, Shared>>
+    unsafe fn get_node_as_instance<'a, T>(&self, path: &str) -> Option<TInstance<'a, T, Shared>>
     where
         T: NativeClass,
         T::Base: SubClass<Node>,

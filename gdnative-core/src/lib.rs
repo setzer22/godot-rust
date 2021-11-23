@@ -14,17 +14,22 @@
 //!
 //! Since it is easy to expect containers and other types to allocate a copy of their
 //! content when using the `Clone` trait, some types do not implement `Clone` and instead
-//! implement [`NewRef`](./trait.NewRef.html) which provides a `new_ref(&self) -> Self` method
+//! implement [`NewRef`](object::NewRef) which provides a `new_ref(&self) -> Self` method
 //! to create references to the same collection or object.
 //!
 //! [thread-safety]: https://docs.godotengine.org/en/stable/tutorials/threads/thread_safe_apis.html
 
 #![deny(clippy::missing_inline_in_public_items)]
-#![allow(clippy::transmute_ptr_to_ptr)]
+#![allow(
+    clippy::transmute_ptr_to_ptr,
+    clippy::missing_safety_doc,
+    clippy::if_then_panic
+)]
 #![cfg_attr(feature = "gd_test", allow(clippy::blacklisted_name))]
 
 #[doc(hidden)]
 pub extern crate gdnative_sys as sys;
+
 #[doc(hidden)]
 pub extern crate libc;
 
@@ -36,27 +41,13 @@ extern crate approx;
 mod macros;
 
 pub mod core_types;
-mod init;
 
-#[cfg(feature = "nativescript")]
-pub mod nativescript;
-
+pub mod export;
+pub mod init;
 pub mod log;
-mod new_ref;
 pub mod object;
-pub mod ref_kind;
-pub mod thread_access;
+pub mod profiler;
 
 /// Internal low-level API for use by macros and generated bindings. Not a part of the public API.
 #[doc(hidden)]
 pub mod private;
-
-//
-// Re-exports
-//
-
-pub use init::{InitializeInfo, TerminateInfo};
-pub use new_ref::NewRef;
-pub use object::{GodotObject, Null, Ref, TRef};
-
-pub type GodotResult = Result<(), core_types::error::GodotError>;

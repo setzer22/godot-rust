@@ -5,19 +5,24 @@ use std::mem::{forget, transmute};
 use std::ptr;
 
 use crate::core_types::*;
+use crate::object::ownership::*;
 use crate::object::*;
 use crate::private::{get_api, ManuallyManagedClassPlaceholder};
-use crate::thread_access::*;
 
 #[cfg(feature = "serde")]
 mod serialize;
 
 // TODO: implement Debug, PartialEq, etc.
 
-/// A `Variant` can represent many of godot's core types.
+/// A `Variant` can represent all Godot values (core types or `Object` class instances).
 ///
-/// The underlying data can be either stored inline or reference-counted,
-/// dependning on the size of the type and whether the it is trivially copyable.
+/// The underlying data is either stored inline or reference-counted on the heap,
+/// depending on the size of the type and whether the it is trivially copyable.
+///
+/// If you compile godot-rust with the `serde` feature enabled, you will have
+/// access to serialization/deserialization support: the traits `Serializable`
+/// and `Deserializable` will be automatically implemented on [`VariantDispatch`]
+/// as well as most of the types in [`core_types`].
 pub struct Variant(pub(crate) sys::godot_variant);
 
 macro_rules! variant_constructors {
@@ -787,27 +792,31 @@ impl Variant {
         unsafe { (get_api().godot_variant_has_method)(&self.0, &method.0) }
     }
 
+    /// Invokes a method on the held object.
+    ///
+    /// # Safety
+    /// This method may invoke [Object::call()] internally, which is unsafe, as it allows
+    /// execution of arbitrary code (including user-defined code in GDScript or unsafe Rust).
     #[inline]
-    pub fn call(
+    pub unsafe fn call(
         &mut self,
         method: impl Into<GodotString>,
         args: &[Variant],
     ) -> Result<Variant, CallError> {
         let method = method.into();
-        unsafe {
-            let api = get_api();
-            let mut err = sys::godot_variant_call_error::default();
-            let mut arg_refs = args.iter().map(Variant::sys).collect::<Vec<_>>();
-            let variant = (api.godot_variant_call)(
-                &mut self.0,
-                &method.0,
-                arg_refs.as_mut_ptr(),
-                args.len() as i32,
-                &mut err,
-            );
 
-            CallError::from_sys(err.error).map(|_| Variant::from_sys(variant))
-        }
+        let api = get_api();
+        let mut err = sys::godot_variant_call_error::default();
+        let mut arg_refs = args.iter().map(Variant::sys).collect::<Vec<_>>();
+        let variant = (api.godot_variant_call)(
+            &mut self.0,
+            &method.0,
+            arg_refs.as_mut_ptr(),
+            args.len() as i32,
+            &mut err,
+        );
+
+        CallError::from_sys(err.error).map(|_| Variant::from_sys(variant))
     }
 
     /// Evaluates a variant operator on `self` and `rhs` and returns the result on success.
@@ -1063,7 +1072,7 @@ pub trait OwnedToVariant {
 ///
 /// This means that for all values `a` and `b`, `a == b` is equivalent to
 /// `a.to_variant() == b.to_variant()`. Most of the time, this means that `to_variant` must
-/// return a "value" type, such as a primitive `i32`, a `GodotString`, or a `TypedArray`.
+/// return a "value" type, such as a primitive `i32`, a `GodotString`, or a `PoolArray`.
 ///
 /// This is mostly useful as a bound for `Dictionary` keys, where the difference between Rust's
 /// structural equality and Godot's referential equality semantics can lead to surprising
@@ -1588,7 +1597,7 @@ from_variant_from_sys!(
     impl FromVariant for Dictionary<Shared> as Dictionary : godot_variant_as_dictionary;
 );
 
-impl<T: crate::core_types::typed_array::Element> ToVariant for TypedArray<T> {
+impl<T: crate::core_types::pool_array::Element> ToVariant for PoolArray<T> {
     #[inline]
     fn to_variant(&self) -> Variant {
         unsafe {
@@ -1599,9 +1608,9 @@ impl<T: crate::core_types::typed_array::Element> ToVariant for TypedArray<T> {
         }
     }
 }
-impl<T: crate::core_types::typed_array::Element + Eq> ToVariantEq for TypedArray<T> {}
+impl<T: crate::core_types::pool_array::Element + Eq> ToVariantEq for PoolArray<T> {}
 
-impl<T: crate::core_types::typed_array::Element> FromVariant for TypedArray<T> {
+impl<T: crate::core_types::pool_array::Element> FromVariant for PoolArray<T> {
     #[inline]
     fn from_variant(variant: &Variant) -> Result<Self, FromVariantError> {
         unsafe {

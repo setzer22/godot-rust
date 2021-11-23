@@ -26,7 +26,7 @@ destroying the object) or destroyed manually using `Ref::free`, or preferably
     quote! {
         #[doc=#documentation]
         #[inline]
-        pub fn new() -> Ref<Self, thread_access::Unique> {
+        pub fn new() -> Ref<Self, ownership::Unique> {
             unsafe {
                 let gd_api = get_api();
                 let ctor = #method_table::get(gd_api).class_constructor.unwrap();
@@ -42,17 +42,17 @@ pub fn generate_godot_object_impl(class: &GodotClass) -> TokenStream {
     let name = &class.name;
     let class_name = format_ident!("{}", class.name);
 
-    let ref_kind = if class.is_refcounted() {
-        quote! { ref_kind::RefCounted }
+    let memory = if class.is_refcounted() {
+        quote! { memory::RefCounted }
     } else {
-        quote! { ref_kind::ManuallyManaged }
+        quote! { memory::ManuallyManaged }
     };
 
     quote! {
         impl gdnative_core::private::godot_object::Sealed for #class_name {}
 
         unsafe impl GodotObject for #class_name {
-            type RefKind = #ref_kind;
+            type Memory = #memory;
 
             #[inline]
             fn class_name() -> &'static str {
@@ -69,7 +69,7 @@ pub fn generate_instantiable_impl(class: &GodotClass) -> TokenStream {
     quote! {
         impl Instanciable for #class_name {
             #[inline]
-            fn construct() -> Ref<Self, thread_access::Unique> {
+            fn construct() -> Ref<Self, ownership::Unique> {
                 #class_name::new()
             }
         }
@@ -154,11 +154,10 @@ pub fn generate_deref_impl(class: &GodotClass) -> TokenStream {
     );
 
     let class_name = format_ident!("{}", class.name);
-    let base_class_module = format_ident!("{}", class.base_class_module());
     let base_class = format_ident!("{}", class.base_class);
 
     let qualified_base_class = quote! {
-        crate::generated::#base_class_module::#base_class
+        crate::generated::#base_class
     };
 
     quote! {
@@ -190,11 +189,10 @@ pub fn generate_sub_class_impls<'a>(api: &'a Api, mut class: &'a GodotClass) -> 
     let mut tokens = TokenStream::new();
 
     while let Some(base_class) = class.base_class(api) {
-        let base_class_module = format_ident!("{}", base_class.module());
         let base_class_ident = format_ident!("{}", base_class.name);
 
         tokens.extend(quote! {
-            unsafe impl SubClass<crate::generated::#base_class_module::#base_class_ident> for #class_name {}
+            unsafe impl SubClass<crate::generated::#base_class_ident> for #class_name {}
         });
 
         class = base_class;
