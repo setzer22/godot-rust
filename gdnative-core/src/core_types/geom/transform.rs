@@ -43,6 +43,7 @@ impl Transform {
         }
     }
 
+    #[inline]
     pub const fn identity() -> Transform {
         Transform {
             basis: Basis::identity(),
@@ -51,6 +52,7 @@ impl Transform {
     }
 
     /// Returns a vector transformed (multiplied) by the matrix.
+    #[inline]
     pub fn xform(&self, v: Vector3) -> Vector3 {
         self.basis.xform(v) + self.origin
     }
@@ -60,6 +62,7 @@ impl Transform {
     ///
     /// **Note:** This results in a multiplication by the inverse of the matrix
     /// only if it represents a rotation-reflection.
+    #[inline]
     pub fn xform_inv(&self, v: Vector3) -> Vector3 {
         self.basis.xform_inv(v - self.origin)
     }
@@ -67,6 +70,7 @@ impl Transform {
     /// Returns the inverse of the transform, under the assumption that the
     /// transformation is composed of rotation and translation (no scaling, use
     /// affine_inverse for transforms with scaling).
+    #[inline]
     pub fn inverse(&self) -> Transform {
         let basis_inv = self.basis.transposed();
         let origin_inv = basis_inv.xform(-self.origin);
@@ -78,6 +82,7 @@ impl Transform {
 
     /// Returns the inverse of the transform, under the assumption that the
     /// transformation is composed of rotation, scaling and translation.
+    #[inline]
     pub fn affine_inverse(&self) -> Transform {
         let basis_inv = self.basis.inverted();
         let origin_inv = basis_inv.xform(-self.origin);
@@ -93,6 +98,7 @@ impl Transform {
     /// The transform will first be rotated around the given up vector, and then
     /// fully aligned to the target by a further rotation around an axis
     /// perpendicular to both the target and up vectors.
+    #[inline]
     pub fn looking_at(eye: Vector3, target: Vector3, up: Vector3) -> Transform {
         let up = up.normalized();
         let v_z = (eye - target).normalized();
