@@ -35,10 +35,10 @@ pub(crate) fn derive_from_varargs(input: DeriveInput) -> Result<TokenStream2, sy
             Fields::Unit => {
                 return Ok(quote! {
                     #derived
-                    impl #generics ::gdnative::nativescript::init::method::FromVarargs for #ident #generics #where_clause {
+                    impl #generics ::gdnative::export::FromVarargs for #ident #generics #where_clause {
                         fn read<'a>(
-                            #input_ident: &mut ::gdnative::nativescript::init::method::Varargs<'a>,
-                        ) -> Result<Self, Vec<::gdnative::nativescript::init::method::ArgumentError<'a>>> {
+                            #input_ident: &mut ::gdnative::export::Varargs<'a>,
+                        ) -> Result<Self, Vec<::gdnative::export::ArgumentError<'a>>> {
                             Ok(#ident)
                         }
                     }
@@ -113,10 +113,10 @@ pub(crate) fn derive_from_varargs(input: DeriveInput) -> Result<TokenStream2, sy
 
         Ok(quote! {
             #derived
-            impl #generics ::gdnative::nativescript::init::method::FromVarargs for #ident #generics #where_clause {
+            impl #generics ::gdnative::export::FromVarargs for #ident #generics #where_clause {
                 fn read<'a>(
-                    #input_ident: &mut ::gdnative::nativescript::init::method::Varargs<'a>,
-                ) -> Result<Self, Vec<::gdnative::nativescript::init::method::ArgumentError<'a>>> {
+                    #input_ident: &mut ::gdnative::export::Varargs<'a>,
+                ) -> Result<Self, Vec<::gdnative::export::ArgumentError<'a>>> {
                     let mut __errors = Vec::new();
 
                     #(

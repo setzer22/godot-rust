@@ -1,7 +1,8 @@
-#![allow(clippy::blacklisted_name)]
+#![allow(clippy::blacklisted_name, clippy::if_then_panic)]
 
 use gdnative::prelude::*;
 
+mod test_async;
 mod test_constructor;
 mod test_derive;
 mod test_free_ub;
@@ -21,7 +22,7 @@ pub extern "C" fn run_tests(
     let mut status = true;
     status &= gdnative::core_types::test_string();
 
-    status &= gdnative::core_types::dictionary::test_dictionary();
+    status &= gdnative::core_types::test_dictionary();
     // status &= gdnative::test_dictionary_clone_clear();
     status &= gdnative::core_types::test_color();
     status &= gdnative::core_types::test_array();
@@ -62,6 +63,7 @@ pub extern "C" fn run_tests(
     status &= test_rust_class_construction();
     status &= test_from_instance_id();
 
+    status &= test_async::run_tests();
     status &= test_derive::run_tests();
     status &= test_free_ub::run_tests();
     status &= test_constructor::run_tests();
@@ -87,7 +89,7 @@ fn test_underscore_method_binding() -> bool {
     .is_ok();
 
     if !ok {
-        gdnative::godot_error!("   !! Test test_underscore_method_binding failed");
+        godot_error!("   !! Test test_underscore_method_binding failed");
     }
 
     ok
@@ -166,7 +168,7 @@ fn test_rust_class_construction() -> bool {
     .is_ok();
 
     if !ok {
-        gdnative::godot_error!("   !! Test test_rust_class_construction failed");
+        godot_error!("   !! Test test_rust_class_construction failed");
     }
 
     ok
@@ -248,7 +250,7 @@ fn test_from_instance_id() -> bool {
     .is_ok();
 
     if !ok {
-        gdnative::godot_error!("   !! Test test_from_instance_id failed");
+        godot_error!("   !! Test test_from_instance_id failed");
     }
 
     ok
@@ -258,6 +260,7 @@ fn init(handle: InitHandle) {
     handle.add_class::<Foo>();
     handle.add_class::<OptionalArgs>();
 
+    test_async::register(handle);
     test_derive::register(handle);
     test_free_ub::register(handle);
     test_constructor::register(handle);
@@ -269,4 +272,10 @@ fn init(handle: InitHandle) {
     test_vararray_return::register(handle);
 }
 
-gdnative::godot_init!(init);
+fn terminate(_term_info: &gdnative::init::TerminateInfo) {
+    gdnative::tasks::terminate_runtime();
+}
+
+gdnative::init::godot_gdnative_init!();
+gdnative::init::godot_nativescript_init!(init);
+gdnative::init::godot_gdnative_terminate!(terminate);

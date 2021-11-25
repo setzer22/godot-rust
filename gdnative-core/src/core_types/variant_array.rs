@@ -1,17 +1,15 @@
 use std::iter::{Extend, FromIterator};
 use std::marker::PhantomData;
 
-use gdnative_impl_proc_macros::doc_variant_collection_safety;
-
 use crate::private::get_api;
 use crate::sys;
 
 use crate::core_types::OwnedToVariant;
 use crate::core_types::ToVariant;
 use crate::core_types::Variant;
-use crate::NewRef;
+use crate::object::NewRef;
 
-use crate::thread_access::*;
+use crate::object::ownership::*;
 
 use std::fmt;
 
@@ -32,24 +30,26 @@ use std::fmt;
 /// safe.
 ///
 /// [thread-safety]: https://docs.godotengine.org/en/stable/tutorials/threads/thread_safe_apis.html
-pub struct VariantArray<Access: ThreadAccess = Shared> {
+pub struct VariantArray<Own: Ownership = Shared> {
     sys: sys::godot_array,
 
     /// Marker preventing the compiler from incorrectly deriving `Send` and `Sync`.
-    _marker: PhantomData<Access>,
+    _marker: PhantomData<Own>,
 }
 
 /// Operations allowed on all arrays at any point in time.
-impl<Access: ThreadAccess> VariantArray<Access> {
+impl<Own: Ownership> VariantArray<Own> {
     /// Sets the value of the element at the given offset.
     #[inline]
     pub fn set<T: OwnedToVariant>(&self, idx: i32, val: T) {
+        self.check_bounds(idx);
         unsafe { (get_api().godot_array_set)(self.sys_mut(), idx, val.owned_to_variant().sys()) }
     }
 
     /// Returns a copy of the element at the given offset.
     #[inline]
     pub fn get(&self, idx: i32) -> Variant {
+        self.check_bounds(idx);
         unsafe { Variant((get_api().godot_array_get)(self.sys(), idx)) }
     }
 
@@ -63,6 +63,7 @@ impl<Access: ThreadAccess> VariantArray<Access> {
     /// `Variant` is reference-counted and thus cheaply cloned. Consider using `get` instead.
     #[inline]
     pub unsafe fn get_ref(&self, idx: i32) -> &Variant {
+        self.check_bounds(idx);
         Variant::cast_ref((get_api().godot_array_operator_index_const)(
             self.sys(),
             idx,
@@ -79,6 +80,7 @@ impl<Access: ThreadAccess> VariantArray<Access> {
     #[inline]
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn get_mut_ref(&self, idx: i32) -> &mut Variant {
+        self.check_bounds(idx);
         Variant::cast_mut_ref((get_api().godot_array_operator_index)(self.sys_mut(), idx))
     }
 
@@ -175,7 +177,7 @@ impl<Access: ThreadAccess> VariantArray<Access> {
     /// Modifying the same underlying collection while observing the safety assumptions will
     /// not violate memory safely, but may lead to surprising behavior in the iterator.
     #[inline]
-    pub fn iter(&self) -> Iter<'_, Access> {
+    pub fn iter(&self) -> Iter<'_, Own> {
         self.into_iter()
     }
 
@@ -215,15 +217,24 @@ impl<Access: ThreadAccess> VariantArray<Access> {
         }
     }
 
-    unsafe fn cast_access<A: ThreadAccess>(self) -> VariantArray<A> {
+    unsafe fn cast_access<A: Ownership>(self) -> VariantArray<A> {
         let sys = self.sys;
         std::mem::forget(self);
         VariantArray::from_sys(sys)
     }
+
+    fn check_bounds(&self, idx: i32) {
+        assert!(
+            idx >= 0 && idx < self.len(),
+            "Index {} out of bounds (len {})",
+            idx,
+            self.len()
+        );
+    }
 }
 
 /// Operations allowed on Dictionaries that can only be referenced to from the current thread.
-impl<Access: LocalThreadAccess> VariantArray<Access> {
+impl<Own: LocalThreadOwnership> VariantArray<Own> {
     /// Clears the array, resizing to 0.
     #[inline]
     pub fn clear(&self) {
@@ -286,7 +297,7 @@ impl<Access: LocalThreadAccess> VariantArray<Access> {
 }
 
 /// Operations allowed on non-unique arrays.
-impl<Access: NonUniqueThreadAccess> VariantArray<Access> {
+impl<Own: NonUniqueOwnership> VariantArray<Own> {
     /// Assume that this is the only reference to this array, on which
     /// operations that change the container size can be safely performed.
     ///
@@ -335,78 +346,6 @@ impl VariantArray<Shared> {
     pub fn new_shared() -> Self {
         VariantArray::<Unique>::new().into_shared()
     }
-
-    /// Clears the array, resizing to 0.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn clear(&self) {
-        (get_api().godot_array_clear)(self.sys_mut());
-    }
-
-    /// Removes the element at `idx`.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn remove(&self, idx: i32) {
-        (get_api().godot_array_remove)(self.sys_mut(), idx)
-    }
-
-    /// Removed the first occurrence of `val`.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn erase<T: ToVariant>(&self, val: T) {
-        (get_api().godot_array_erase)(self.sys_mut(), val.to_variant().sys())
-    }
-
-    /// Resizes the array, filling with `Nil` if necessary.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn resize(&self, size: i32) {
-        (get_api().godot_array_resize)(self.sys_mut(), size)
-    }
-
-    /// Appends an element at the end of the array.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn push<T: OwnedToVariant>(&self, val: T) {
-        (get_api().godot_array_push_back)(self.sys_mut(), val.owned_to_variant().sys());
-    }
-
-    /// Removes an element at the end of the array.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn pop(&self) -> Variant {
-        Variant((get_api().godot_array_pop_back)(self.sys_mut()))
-    }
-
-    /// Appends an element to the front of the array.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn push_front<T: OwnedToVariant>(&self, val: T) {
-        (get_api().godot_array_push_front)(self.sys_mut(), val.owned_to_variant().sys());
-    }
-
-    /// Removes an element at the front of the array.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn pop_front(&self) -> Variant {
-        Variant((get_api().godot_array_pop_front)(self.sys_mut()))
-    }
-
-    /// Insert a new int at a given position in the array.
-    ///
-    #[doc_variant_collection_safety]
-    #[inline]
-    pub unsafe fn insert<T: OwnedToVariant>(&self, at: i32, val: T) {
-        (get_api().godot_array_insert)(self.sys_mut(), at, val.owned_to_variant().sys())
-    }
 }
 
 /// Operations allowed on Dictionaries that may only be shared on the current thread.
@@ -439,7 +378,7 @@ impl Default for VariantArray<ThreadLocal> {
     }
 }
 
-impl<Access: NonUniqueThreadAccess> NewRef for VariantArray<Access> {
+impl<Own: NonUniqueOwnership> NewRef for VariantArray<Own> {
     #[inline]
     fn new_ref(&self) -> Self {
         unsafe {
@@ -450,14 +389,14 @@ impl<Access: NonUniqueThreadAccess> NewRef for VariantArray<Access> {
     }
 }
 
-impl<Access: ThreadAccess> Drop for VariantArray<Access> {
+impl<Own: Ownership> Drop for VariantArray<Own> {
     #[inline]
     fn drop(&mut self) {
         unsafe { (get_api().godot_array_destroy)(self.sys_mut()) }
     }
 }
 
-impl<Access: ThreadAccess> fmt::Debug for VariantArray<Access> {
+impl<Own: Ownership> fmt::Debug for VariantArray<Own> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -465,12 +404,12 @@ impl<Access: ThreadAccess> fmt::Debug for VariantArray<Access> {
 }
 
 // #[derive(Debug)]
-pub struct Iter<'a, Access: ThreadAccess> {
-    arr: &'a VariantArray<Access>,
+pub struct Iter<'a, Own: Ownership> {
+    arr: &'a VariantArray<Own>,
     range: std::ops::Range<i32>,
 }
 
-impl<'a, Access: ThreadAccess> Iterator for Iter<'a, Access> {
+impl<'a, Own: Ownership> Iterator for Iter<'a, Own> {
     type Item = Variant;
 
     #[inline]
@@ -505,9 +444,9 @@ impl<'a, Access: ThreadAccess> Iterator for Iter<'a, Access> {
     }
 }
 
-impl<'a, Access: ThreadAccess> IntoIterator for &'a VariantArray<Access> {
+impl<'a, Own: Ownership> IntoIterator for &'a VariantArray<Own> {
     type Item = Variant;
-    type IntoIter = Iter<'a, Access>;
+    type IntoIter = Iter<'a, Own>;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         Iter {
@@ -579,7 +518,7 @@ impl<T: ToVariant> FromIterator<T> for VariantArray<Unique> {
     }
 }
 
-impl<T: ToVariant, Access: LocalThreadAccess> Extend<T> for VariantArray<Access> {
+impl<T: ToVariant, Own: LocalThreadOwnership> Extend<T> for VariantArray<Own> {
     #[inline]
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for elem in iter {
@@ -675,12 +614,24 @@ godot_test!(test_array {
 
 godot_test!(
     test_array_debug {
+        use std::panic::catch_unwind;
+
         let arr = VariantArray::new(); // []
         arr.push(&Variant::from_str("hello world"));
         arr.push(&Variant::from_bool(true));
         arr.push(&Variant::from_i64(42));
 
         assert_eq!(format!("{:?}", arr), "[GodotString(hello world), Bool(True), I64(42)]");
+
+        let set = catch_unwind(|| { arr.set(3, 7i64); });
+        let get = catch_unwind(|| { arr.get(3); });
+        let get_ref = catch_unwind(|| { unsafe { arr.get_ref(3) }; });
+        let get_mut_ref = catch_unwind(|| { unsafe { arr.get_mut_ref(3) }; });
+
+        assert!(set.is_err(), "set() out of bounds causes panic");
+        assert!(get.is_err(), "get() out of bounds causes panic");
+        assert!(get_ref.is_err(), "get_mut() out of bounds causes panic");
+        assert!(get_mut_ref.is_err(), "get_mut_ref() out of bounds causes panic");
     }
 );
 

@@ -2,6 +2,9 @@ use std::ffi::CString;
 
 use crate::sys;
 
+// ----------------------------------------------------------------------------------------------------------------------------------------------
+// Unsafe helpers for sys
+
 static mut GODOT_API: Option<sys::GodotApi> = None;
 static mut GDNATIVE_LIBRARY_SYS: Option<*mut sys::godot_object> = None;
 
@@ -30,10 +33,7 @@ pub unsafe fn bind_api(options: *mut sys::godot_gdnative_init_options) -> bool {
 
     ObjectMethodTable::get(get_api());
     ReferenceMethodTable::get(get_api());
-    #[cfg(feature = "nativescript")]
-    {
-        NativeScriptMethodTable::get(get_api());
-    }
+    NativeScriptMethodTable::get(get_api());
 
     true
 }
@@ -75,6 +75,7 @@ unsafe fn check_api_compatibility(
 /// not bound will lead to an abort**, since in most cases there is simply no point to continue
 /// if `get_api` failed. This allows it to be used in FFI contexts without a `catch_unwind`.
 #[inline]
+#[allow(clippy::redundant_closure)] // clippy false positive: https://github.com/rust-lang/rust-clippy/issues/7812
 pub fn get_api() -> &'static sys::GodotApi {
     unsafe { GODOT_API.as_ref().unwrap_or_else(|| std::process::abort()) }
 }
@@ -108,11 +109,9 @@ pub fn get_gdnative_library_sys() -> *mut sys::godot_object {
 /// This is intended to be an internal interface.
 #[inline]
 pub unsafe fn cleanup_internal_state() {
-    #[cfg(feature = "nativescript")]
-    {
-        crate::nativescript::type_tag::cleanup();
-        crate::nativescript::class_registry::cleanup();
-    }
+    crate::export::type_tag::cleanup();
+    crate::export::class_registry::cleanup();
+
     GODOT_API = None;
 }
 
@@ -149,7 +148,7 @@ pub mod godot_object {
 pub(crate) struct ManuallyManagedClassPlaceholder;
 
 unsafe impl crate::object::GodotObject for ManuallyManagedClassPlaceholder {
-    type RefKind = crate::ref_kind::ManuallyManaged;
+    type Memory = crate::object::memory::ManuallyManaged;
 
     fn class_name() -> &'static str {
         "Object"
@@ -161,7 +160,7 @@ impl godot_object::Sealed for ManuallyManagedClassPlaceholder {}
 pub(crate) struct ReferenceCountedClassPlaceholder;
 
 unsafe impl crate::object::GodotObject for ReferenceCountedClassPlaceholder {
-    type RefKind = crate::ref_kind::RefCounted;
+    type Memory = crate::object::memory::RefCounted;
 
     fn class_name() -> &'static str {
         "Reference"
@@ -222,8 +221,7 @@ make_method_table!(struct ReferenceMethodTable for Reference {
 });
 
 // Add this one here too. It's not easy to use this macro from the
-// nativescript module without making this macro public.
-#[cfg(feature = "nativescript")]
+// export module without making this macro public.
 make_method_table!(struct NativeScriptMethodTable for NativeScript {
     set_class_name,
     set_library,

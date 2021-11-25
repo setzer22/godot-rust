@@ -1,4 +1,9 @@
-//! Types that represent core-datatypes of Godot.
+//! Types that represent [core types](https://docs.godotengine.org/en/stable/development/cpp/core_types.html) of Godot.
+//!
+//! In contrast to generated Godot class types from the `api` module, the types in here are hand-written in idiomatic Rust and
+//! are the counterparts to built-in types in GDScript.
+//!
+//! godot-rust provides optional serialization support for many core types.  Enable the feature `serde` to make use of it.
 
 mod geom;
 
@@ -6,44 +11,42 @@ mod access;
 mod byte_array;
 mod color;
 mod color_array;
+mod dictionary;
+mod error;
 mod float32_array;
 mod int32_array;
 mod node_path;
+mod pool_array;
 mod quat;
 mod rect2;
 mod rid;
 mod string;
 mod string_array;
 mod transform2d;
-mod typed_array;
 mod variant;
 mod variant_array;
 mod vector2;
 mod vector2_array;
+mod vector3;
 mod vector3_array;
-
-pub mod dictionary;
-pub mod error;
-pub mod vector3;
-
-pub use geom::*;
 
 pub use access::*;
 pub use byte_array::*;
 pub use color::*;
 pub use color_array::*;
-pub use dictionary::Dictionary;
-pub use error::GodotError;
+pub use dictionary::*;
+pub use error::{GodotError, GodotResult};
 pub use float32_array::*;
+pub use geom::*;
 pub use int32_array::*;
 pub use node_path::*;
+pub use pool_array::*; // TODO rename Element to something more specific
 pub use quat::*;
 pub use rect2::*;
 pub use rid::*;
 pub use string::*;
 pub use string_array::*;
 pub use transform2d::*;
-pub use typed_array::{Element, TypedArray};
 pub use variant::*;
 pub use variant_array::*;
 pub use vector2::*;

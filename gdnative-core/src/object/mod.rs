@@ -1,3 +1,11 @@
+//! Provides types to interact with the Godot `Object` class hierarchy
+//!
+//! This module contains wrappers and helpers to interact with Godot objects.
+//! In Godot, classes stand in an inheritance relationship, with the root at `Object`.
+//!
+//! If you are looking for how to manage user-defined types (native scripts),
+//! check out the [`export`][crate::export] module.
+
 use std::borrow::Borrow;
 use std::ffi::CString;
 use std::fmt::{self, Debug};
@@ -6,19 +14,28 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
-use crate::private::{get_api, ManuallyManagedClassPlaceholder, ReferenceCountedClassPlaceholder};
-use crate::ref_kind::{ManuallyManaged, RefCounted, RefKind};
-use crate::sys;
-use crate::thread_access::{
-    LocalThreadAccess, NonUniqueThreadAccess, Shared, ThreadAccess, ThreadLocal, Unique,
+use bounds::{
+    AssumeSafeLifetime, LifetimeConstraint, MemorySpec, PtrWrapper, RefImplBound, SafeAsRaw,
+    SafeDeref,
 };
+use memory::{ManuallyManaged, Memory, RefCounted};
+use ownership::{NonUniqueOwnership, Ownership, Shared, ThreadLocal, Unique};
 
-#[cfg(feature = "nativescript")]
-use crate::nativescript::{Instance, NativeClass, RefInstance};
+use crate::export::NativeClass;
+use crate::private::{get_api, ManuallyManagedClassPlaceholder, ReferenceCountedClassPlaceholder};
+use crate::sys;
 
+pub use instance::*;
+pub use new_ref::NewRef;
+pub use raw::RawObject;
+
+pub mod bounds;
+pub mod memory;
+pub mod ownership;
+
+mod instance;
+mod new_ref;
 mod raw;
-
-pub use self::raw::RawObject;
 
 /// Trait for Godot API objects. This trait is sealed, and implemented for generated wrapper
 /// types.
@@ -38,7 +55,7 @@ pub unsafe trait GodotObject: Sized + crate::private::godot_object::Sealed {
     /// The memory management kind of this type. This modifies the behavior of the
     /// [`Ref`](struct.Ref.html) smart pointer. See its type-level documentation for more
     /// information.
-    type RefKind: RefKind;
+    type Memory: Memory;
 
     fn class_name() -> &'static str;
 
@@ -131,7 +148,7 @@ pub unsafe trait GodotObject: Sized + crate::private::godot_object::Sealed {
     #[inline]
     unsafe fn assume_thread_local(&self) -> Ref<Self, ThreadLocal>
     where
-        Self: Sized + GodotObject<RefKind = RefCounted>,
+        Self: Sized + GodotObject<Memory = RefCounted>,
     {
         Ref::from_sys(self.as_raw().sys())
     }
@@ -277,33 +294,33 @@ pub trait QueueFree: GodotObject {
 /// Many trait implementations for `Ref` are conditional, dependent on the type parameters.
 /// When viewing rustdoc documentation, you may expand the documentation on their respective
 /// `impl` blocks  for more detailed explanations of the trait bounds.
-pub struct Ref<T: GodotObject, Access: ThreadAccess = Shared> {
-    ptr: <T::RefKind as RefKindSpec>::PtrWrapper,
-    _marker: PhantomData<(*const T, Access)>,
+pub struct Ref<T: GodotObject, Own: Ownership = Shared> {
+    ptr: <T::Memory as MemorySpec>::PtrWrapper,
+    _marker: PhantomData<(*const T, Own)>,
 }
 
 /// `Ref` is `Send` if the thread access is `Shared` or `Unique`.
-unsafe impl<T: GodotObject, Access: ThreadAccess + Send> Send for Ref<T, Access> {}
+unsafe impl<T: GodotObject, Own: Ownership + Send> Send for Ref<T, Own> {}
 
 /// `Ref` is `Sync` if the thread access is `Shared`.
-unsafe impl<T: GodotObject, Access: ThreadAccess + Sync> Sync for Ref<T, Access> {}
+unsafe impl<T: GodotObject, Own: Ownership + Sync> Sync for Ref<T, Own> {}
 
-impl<T: GodotObject, Access: ThreadAccess> private::Sealed for Ref<T, Access> {}
+impl<T: GodotObject, Own: Ownership> private::Sealed for Ref<T, Own> {}
 
 /// `Ref` is `Copy` if the underlying object is manually-managed, and the access is not
 /// `Unique`.
-impl<T, Access> Copy for Ref<T, Access>
+impl<T, Own> Copy for Ref<T, Own>
 where
-    T: GodotObject<RefKind = ManuallyManaged>,
-    Access: NonUniqueThreadAccess,
+    T: GodotObject<Memory = ManuallyManaged>,
+    Own: NonUniqueOwnership,
 {
 }
 
 /// `Ref` is `Clone` if the access is not `Unique`.
-impl<T, Access> Clone for Ref<T, Access>
+impl<T, Own> Clone for Ref<T, Own>
 where
     T: GodotObject,
-    Access: NonUniqueThreadAccess,
+    Own: NonUniqueOwnership,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -325,7 +342,7 @@ impl<T: GodotObject + Instanciable> Ref<T, Unique> {
 
 impl<T: GodotObject> Ref<T, Unique> {
     /// Creates a new instance of a sub-class of `T` by its class name. Returns `None` if the
-    /// class does not exist, cannot be constructed, has a different `RefKind` from, or is not
+    /// class does not exist, cannot be constructed, has a different `Memory` from, or is not
     /// a sub-class of `T`.
     ///
     /// The lifetime of the returned object is *not* automatically managed if `T` is a manually-
@@ -339,35 +356,35 @@ impl<T: GodotObject> Ref<T, Unique> {
             let class_name = CString::new(class_name).ok()?;
             let ctor = (get_api().godot_get_class_constructor)(class_name.as_ptr())?;
             let ptr = NonNull::new(ctor() as *mut sys::godot_object)?;
-            <T::RefKind as RefKindSpec>::impl_from_maybe_ref_counted(ptr)
+            <T::Memory as MemorySpec>::impl_from_maybe_ref_counted(ptr)
         }
     }
 }
 
 /// Method for references that can be safely used.
-impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access>
+impl<T: GodotObject, Own: Ownership> Ref<T, Own>
 where
-    RefImplBound: SafeDeref<T::RefKind, Access>,
+    RefImplBound: SafeDeref<T::Memory, Own>,
 {
     /// Returns a safe temporary reference that tracks thread access.
     ///
-    /// `Ref<T, Access>` can be safely dereferenced if either:
+    /// `Ref<T, Own>` can be safely dereferenced if either:
     ///
-    /// - `T` is reference-counted and `Access` is not `Shared`,
-    /// - or, `T` is manually-managed and `Access` is `Unique`.
+    /// - `T` is reference-counted and `Ownership` is not `Shared`,
+    /// - or, `T` is manually-managed and `Ownership` is `Unique`.
     #[inline]
-    pub fn as_ref(&self) -> TRef<'_, T, Access> {
+    pub fn as_ref(&self) -> TRef<'_, T, Own> {
         RefImplBound::impl_as_ref(self)
     }
 }
 
-/// `Ref<T, Access>` can be safely dereferenced if either:
+/// `Ref<T, Own>` can be safely dereferenced if either:
 ///
-/// - `T` is reference-counted and `Access` is not `Shared`,
-/// - or, `T` is manually-managed and `Access` is `Unique`.
-impl<T: GodotObject, Access: ThreadAccess> Deref for Ref<T, Access>
+/// - `T` is reference-counted and `Ownership` is not `Shared`,
+/// - or, `T` is manually-managed and `Ownership` is `Unique`.
+impl<T: GodotObject, Own: Ownership> Deref for Ref<T, Own>
 where
-    RefImplBound: SafeDeref<T::RefKind, Access>,
+    RefImplBound: SafeDeref<T::Memory, Own>,
 {
     type Target = T;
 
@@ -377,13 +394,13 @@ where
     }
 }
 
-/// `Ref<T, Access>` can be safely dereferenced if either:
+/// `Ref<T, Own>` can be safely dereferenced if either:
 ///
-/// - `T` is reference-counted and `Access` is not `Shared`,
-/// - or, `T` is manually-managed and `Access` is `Unique`.
-impl<T: GodotObject, Access: ThreadAccess> Borrow<T> for Ref<T, Access>
+/// - `T` is reference-counted and `Ownership` is not `Shared`,
+/// - or, `T` is manually-managed and `Ownership` is `Unique`.
+impl<T: GodotObject, Own: Ownership> Borrow<T> for Ref<T, Own>
 where
-    RefImplBound: SafeDeref<T::RefKind, Access>,
+    RefImplBound: SafeDeref<T::Memory, Own>,
 {
     #[inline]
     fn borrow(&self) -> &T {
@@ -395,9 +412,9 @@ where
 ///
 /// - All `Ref`s to reference-counted types always point to valid objects.
 /// - `Ref` to manually-managed types are only guaranteed to be valid if `Unique`.
-impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access>
+impl<T: GodotObject, Own: Ownership> Ref<T, Own>
 where
-    RefImplBound: SafeAsRaw<T::RefKind, Access>,
+    RefImplBound: SafeAsRaw<T::Memory, Own>,
 {
     /// Cast to a `RawObject` reference safely. This is an internal interface.
     #[inline]
@@ -412,13 +429,13 @@ where
     /// The `cast` method can only be used for downcasts. For statically casting to a
     /// supertype, use `upcast` instead.
     ///
-    /// This is only possible between types with the same `RefKind`s, since otherwise the
+    /// This is only possible between types with the same `Memory`s, since otherwise the
     /// reference can get leaked. Casting between `Object` and `Reference` is possible on
     /// `TRef` and bare references.
     #[inline]
-    pub fn cast<U>(self) -> Option<Ref<U, Access>>
+    pub fn cast<U>(self) -> Option<Ref<U, Own>>
     where
-        U: GodotObject<RefKind = T::RefKind> + SubClass<T>,
+        U: GodotObject<Memory = T::Memory> + SubClass<T>,
     {
         self.try_cast().ok()
     }
@@ -426,13 +443,13 @@ where
     /// Performs a static reference upcast to a supertype, keeping the reference count.
     /// This is guaranteed to be valid.
     ///
-    /// This is only possible between types with the same `RefKind`s, since otherwise the
+    /// This is only possible between types with the same `Memory`s, since otherwise the
     /// reference can get leaked. Casting between `Object` and `Reference` is possible on
     /// `TRef` and bare references.
     #[inline]
-    pub fn upcast<U>(self) -> Ref<U, Access>
+    pub fn upcast<U>(self) -> Ref<U, Own>
     where
-        U: GodotObject<RefKind = T::RefKind>,
+        U: GodotObject<Memory = T::Memory>,
         T: SubClass<U>,
     {
         unsafe { self.cast_unchecked() }
@@ -440,7 +457,7 @@ where
 
     /// Performs a dynamic reference cast to target type, keeping the reference count.
     ///
-    /// This is only possible between types with the same `RefKind`s, since otherwise the
+    /// This is only possible between types with the same `Memory`s, since otherwise the
     /// reference can get leaked. Casting between `Object` and `Reference` is possible on
     /// `TRef` and bare references.
     ///
@@ -448,9 +465,9 @@ where
     ///
     /// Returns `Err(self)` if the cast failed.
     #[inline]
-    pub fn try_cast<U>(self) -> Result<Ref<U, Access>, Self>
+    pub fn try_cast<U>(self) -> Result<Ref<U, Own>, Self>
     where
-        U: GodotObject<RefKind = T::RefKind> + SubClass<T>,
+        U: GodotObject<Memory = T::Memory> + SubClass<T>,
     {
         if self.as_raw().is_class::<U>() {
             Ok(unsafe { self.cast_unchecked() })
@@ -460,9 +477,9 @@ where
     }
 
     /// Performs an unchecked cast.
-    unsafe fn cast_unchecked<U>(self) -> Ref<U, Access>
+    unsafe fn cast_unchecked<U>(self) -> Ref<U, Own>
     where
-        U: GodotObject<RefKind = T::RefKind>,
+        U: GodotObject<Memory = T::Memory>,
     {
         let ret = Ref::move_from_sys(self.ptr.as_non_null());
         std::mem::forget(self);
@@ -474,8 +491,7 @@ where
     ///
     /// The resulting `Instance` is not necessarily safe to use directly.
     #[inline]
-    #[cfg(feature = "nativescript")]
-    pub fn cast_instance<C>(self) -> Option<Instance<C, Access>>
+    pub fn cast_instance<C>(self) -> Option<Instance<C, Own>>
     where
         C: NativeClass<Base = T>,
     {
@@ -488,8 +504,7 @@ where
     ///
     /// Returns `Err(self)` if the cast failed.
     #[inline]
-    #[cfg(feature = "nativescript")]
-    pub fn try_cast_instance<C>(self) -> Result<Instance<C, Access>, Self>
+    pub fn try_cast_instance<C>(self) -> Result<Instance<C, Own>, Self>
     where
         C: NativeClass<Base = T>,
     {
@@ -535,9 +550,9 @@ impl<T: GodotObject> Ref<T, Shared> {
     #[inline(always)]
     pub unsafe fn assume_safe<'a, 'r>(&'r self) -> TRef<'a, T, Shared>
     where
-        AssumeSafeLifetime<'a, 'r>: LifetimeConstraint<T::RefKind>,
+        AssumeSafeLifetime<'a, 'r>: LifetimeConstraint<T::Memory>,
     {
-        T::RefKind::impl_assume_safe(self)
+        T::Memory::impl_assume_safe(self)
     }
 
     /// Assume that `self` is the unique reference to the underlying object.
@@ -552,12 +567,12 @@ impl<T: GodotObject> Ref<T, Shared> {
     /// care.
     #[inline(always)]
     pub unsafe fn assume_unique(self) -> Ref<T, Unique> {
-        T::RefKind::impl_assume_unique(self)
+        T::Memory::impl_assume_unique(self)
     }
 }
 
 /// Extra methods with explicit sanity checks for manually-managed unsafe references.
-impl<T: GodotObject<RefKind = ManuallyManaged>> Ref<T, Shared> {
+impl<T: GodotObject<Memory = ManuallyManaged>> Ref<T, Shared> {
     /// Returns `true` if the pointer currently points to a valid object of the correct type.
     /// **This does NOT guarantee that it's safe to use this pointer.**
     ///
@@ -611,7 +626,7 @@ impl<T: GodotObject<RefKind = ManuallyManaged>> Ref<T, Shared> {
 
 /// Methods for conversion from `Shared` to `ThreadLocal` access. This is only available for
 /// reference-counted types.
-impl<T: GodotObject<RefKind = RefCounted>> Ref<T, Shared> {
+impl<T: GodotObject<Memory = RefCounted>> Ref<T, Shared> {
     /// Assume that all references to the underlying object is local to the current thread.
     ///
     /// This is guaranteed to be a no-op at runtime.
@@ -629,7 +644,7 @@ impl<T: GodotObject<RefKind = RefCounted>> Ref<T, Shared> {
 
 /// Methods for conversion from `Unique` to `ThreadLocal` access. This is only available for
 /// reference-counted types.
-impl<T: GodotObject<RefKind = RefCounted>> Ref<T, Unique> {
+impl<T: GodotObject<Memory = RefCounted>> Ref<T, Unique> {
     /// Convert to a thread-local reference.
     ///
     /// This is guaranteed to be a no-op at runtime.
@@ -651,7 +666,7 @@ impl<T: GodotObject> Ref<T, Unique> {
 }
 
 /// Methods for freeing `Unique` references to manually-managed objects.
-impl<T: GodotObject<RefKind = ManuallyManaged>> Ref<T, Unique> {
+impl<T: GodotObject<Memory = ManuallyManaged>> Ref<T, Unique> {
     /// Manually frees the object.
     ///
     /// Manually-managed objects are not free-on-drop *even when the access is unique*, because
@@ -669,7 +684,7 @@ impl<T: GodotObject<RefKind = ManuallyManaged>> Ref<T, Unique> {
 }
 
 /// Methods for freeing `Unique` references to manually-managed objects.
-impl<T: GodotObject<RefKind = ManuallyManaged> + QueueFree> Ref<T, Unique> {
+impl<T: GodotObject<Memory = ManuallyManaged> + QueueFree> Ref<T, Unique> {
     /// Queues the object for deallocation in the near future. This is preferable for `Node`s
     /// compared to `Ref::free`.
     ///
@@ -682,22 +697,23 @@ impl<T: GodotObject<RefKind = ManuallyManaged> + QueueFree> Ref<T, Unique> {
 }
 
 /// Reference equality.
-impl<T: GodotObject, Access: ThreadAccess> Eq for Ref<T, Access> {}
+impl<T: GodotObject, Own: Ownership> Eq for Ref<T, Own> {}
+
 /// Reference equality.
-impl<T, Access, RhsAccess> PartialEq<Ref<T, RhsAccess>> for Ref<T, Access>
+impl<T, Own, RhsOws> PartialEq<Ref<T, RhsOws>> for Ref<T, Own>
 where
     T: GodotObject,
-    Access: ThreadAccess,
-    RhsAccess: ThreadAccess,
+    Own: Ownership,
+    RhsOws: Ownership,
 {
     #[inline]
-    fn eq(&self, other: &Ref<T, RhsAccess>) -> bool {
+    fn eq(&self, other: &Ref<T, RhsOws>) -> bool {
         self.ptr.as_non_null() == other.ptr.as_non_null()
     }
 }
 
 /// Ordering of the raw pointer value.
-impl<T: GodotObject, Access: ThreadAccess> Ord for Ref<T, Access> {
+impl<T: GodotObject, Own: Ownership> Ord for Ref<T, Own> {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.ptr.as_non_null().cmp(&other.ptr.as_non_null())
@@ -705,7 +721,7 @@ impl<T: GodotObject, Access: ThreadAccess> Ord for Ref<T, Access> {
 }
 
 /// Ordering of the raw pointer value.
-impl<T: GodotObject, Access: ThreadAccess> PartialOrd for Ref<T, Access> {
+impl<T: GodotObject, Own: Ownership> PartialOrd for Ref<T, Own> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.ptr.as_non_null().partial_cmp(&other.ptr.as_non_null())
@@ -713,21 +729,21 @@ impl<T: GodotObject, Access: ThreadAccess> PartialOrd for Ref<T, Access> {
 }
 
 /// Hashes the raw pointer.
-impl<T: GodotObject, Access: ThreadAccess> Hash for Ref<T, Access> {
+impl<T: GodotObject, Own: Ownership> Hash for Ref<T, Own> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_usize(self.ptr.as_ptr() as usize)
     }
 }
 
-impl<T: GodotObject, Access: ThreadAccess> Debug for Ref<T, Access> {
+impl<T: GodotObject, Own: Ownership> Debug for Ref<T, Own> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}({:p})", T::class_name(), self.ptr.as_ptr())
     }
 }
 
-impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
+impl<T: GodotObject, Own: Ownership> Ref<T, Own> {
     /// Convert to a nullable raw pointer.
     #[doc(hidden)]
     #[inline]
@@ -766,7 +782,7 @@ impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
     #[inline]
     pub unsafe fn move_from_sys(obj: NonNull<sys::godot_object>) -> Self {
         Ref {
-            ptr: <T::RefKind as RefKindSpec>::PtrWrapper::new(obj),
+            ptr: <T::Memory as MemorySpec>::PtrWrapper::new(obj),
             _marker: PhantomData,
         }
     }
@@ -780,7 +796,7 @@ impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
     #[inline]
     pub unsafe fn from_sys(obj: NonNull<sys::godot_object>) -> Self {
         let ret = Self::move_from_sys(obj);
-        <T::RefKind as RefKindSpec>::maybe_add_ref(ret.as_raw_unchecked());
+        <T::Memory as MemorySpec>::maybe_add_ref(ret.as_raw_unchecked());
         ret
     }
 
@@ -794,7 +810,7 @@ impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
     #[inline]
     pub unsafe fn init_from_sys(obj: NonNull<sys::godot_object>) -> Self {
         let ret = Self::move_from_sys(obj);
-        <T::RefKind as RefKindSpec>::maybe_init_ref(ret.as_raw_unchecked());
+        <T::Memory as MemorySpec>::maybe_init_ref(ret.as_raw_unchecked());
         ret
     }
 
@@ -803,7 +819,7 @@ impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
     /// # Safety
     ///
     /// The cast must be valid.
-    unsafe fn cast_access<TargetAccess: ThreadAccess>(self) -> Ref<T, TargetAccess> {
+    unsafe fn cast_access<TargetOws: Ownership>(self) -> Ref<T, TargetOws> {
         let ret = Ref::move_from_sys(self.ptr.as_non_null());
         std::mem::forget(self);
         ret
@@ -819,7 +835,7 @@ impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
     /// The same safety constraints as `assume_safe` applies.
     #[doc(hidden)]
     #[inline(always)]
-    pub unsafe fn assume_safe_unchecked<'a>(&self) -> TRef<'a, T, Access> {
+    pub unsafe fn assume_safe_unchecked<'a>(&self) -> TRef<'a, T, Own> {
         TRef::new(T::cast_ref(self.as_raw_unchecked()))
     }
 }
@@ -838,27 +854,27 @@ impl<T: GodotObject, Access: ThreadAccess> Ref<T, Access> {
 ///
 /// It's possible to use `TRef` as the `owner` argument in NativeScript methods. This can make
 /// passing `owner` to methods easier.
-pub struct TRef<'a, T: GodotObject, Access: ThreadAccess = Shared> {
+pub struct TRef<'a, T: GodotObject, Own: Ownership = Shared> {
     obj: &'a T,
-    _marker: PhantomData<Access>,
+    _marker: PhantomData<Own>,
 }
 
-impl<'a, T: GodotObject, Access: ThreadAccess> Copy for TRef<'a, T, Access> {}
-impl<'a, T: GodotObject, Access: ThreadAccess> Clone for TRef<'a, T, Access> {
+impl<'a, T: GodotObject, Own: Ownership> Copy for TRef<'a, T, Own> {}
+impl<'a, T: GodotObject, Own: Ownership> Clone for TRef<'a, T, Own> {
     #[inline]
     fn clone(&self) -> Self {
         TRef::new(self.obj)
     }
 }
 
-impl<'a, T: GodotObject, Access: ThreadAccess> Debug for TRef<'a, T, Access> {
+impl<'a, T: GodotObject, Own: Ownership> Debug for TRef<'a, T, Own> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}({:p})", T::class_name(), self.obj)
     }
 }
 
-impl<'a, T: GodotObject, Access: ThreadAccess> Deref for TRef<'a, T, Access> {
+impl<'a, T: GodotObject, Own: Ownership> Deref for TRef<'a, T, Own> {
     type Target = T;
 
     #[inline]
@@ -867,21 +883,21 @@ impl<'a, T: GodotObject, Access: ThreadAccess> Deref for TRef<'a, T, Access> {
     }
 }
 
-impl<'a, T: GodotObject, Access: ThreadAccess> AsRef<T> for TRef<'a, T, Access> {
+impl<'a, T: GodotObject, Own: Ownership> AsRef<T> for TRef<'a, T, Own> {
     #[inline]
     fn as_ref(&self) -> &T {
         self.obj
     }
 }
 
-impl<'a, T: GodotObject, Access: ThreadAccess> Borrow<T> for TRef<'a, T, Access> {
+impl<'a, T: GodotObject, Own: Ownership> Borrow<T> for TRef<'a, T, Own> {
     #[inline]
     fn borrow(&self) -> &T {
         self.obj
     }
 }
 
-impl<'a, T: GodotObject, Access: ThreadAccess> TRef<'a, T, Access> {
+impl<'a, T: GodotObject, Own: Ownership> TRef<'a, T, Own> {
     pub(crate) fn new(obj: &'a T) -> Self {
         TRef {
             obj,
@@ -898,7 +914,7 @@ impl<'a, T: GodotObject, Access: ThreadAccess> TRef<'a, T, Access> {
 
     /// Performs a dynamic reference cast to target type, keeping the thread access info.
     #[inline]
-    pub fn cast<U>(self) -> Option<TRef<'a, U, Access>>
+    pub fn cast<U>(self) -> Option<TRef<'a, U, Own>>
     where
         U: GodotObject + SubClass<T>,
     {
@@ -910,7 +926,7 @@ impl<'a, T: GodotObject, Access: ThreadAccess> TRef<'a, T, Access> {
     ///
     /// This is guaranteed to be a no-op at runtime.
     #[inline(always)]
-    pub fn upcast<U>(&self) -> TRef<'a, U, Access>
+    pub fn upcast<U>(&self) -> TRef<'a, U, Own>
     where
         U: GodotObject,
         T: SubClass<U>,
@@ -918,28 +934,27 @@ impl<'a, T: GodotObject, Access: ThreadAccess> TRef<'a, T, Access> {
         TRef::new(self.obj.upcast())
     }
 
-    /// Convenience method to downcast to `RefInstance` where `self` is the base object.
+    /// Convenience method to downcast to `TInstance` where `self` is the base object.
     #[inline]
-    #[cfg(feature = "nativescript")]
-    pub fn cast_instance<C>(self) -> Option<RefInstance<'a, C, Access>>
+    pub fn cast_instance<C>(self) -> Option<TInstance<'a, C, Own>>
     where
         C: NativeClass<Base = T>,
     {
-        RefInstance::try_from_base(self)
+        TInstance::try_from_base(self)
     }
 }
 
-impl<'a, Kind, T, Access> TRef<'a, T, Access>
+impl<'a, Kind, T, Own> TRef<'a, T, Own>
 where
-    Kind: RefKind,
-    T: GodotObject<RefKind = Kind>,
-    Access: NonUniqueThreadAccess,
+    Kind: Memory,
+    T: GodotObject<Memory = Kind>,
+    Own: NonUniqueOwnership,
 {
     /// Persists this reference into a persistent `Ref` with the same thread access.
     ///
     /// This is only available for non-`Unique` accesses.
     #[inline]
-    pub fn claim(self) -> Ref<T, Access> {
+    pub fn claim(self) -> Ref<T, Own> {
         unsafe { Ref::from_sys(self.obj.as_raw().sys()) }
     }
 }
@@ -1094,254 +1109,6 @@ where
 impl<'a, T: GodotObject> AsVariant for &'a Ref<T, Shared> {
     type Target = T;
 }
-
-/// Trait for combinations of `RefKind` and `ThreadAccess` that can be dereferenced safely.
-/// This is an internal interface.
-pub unsafe trait SafeDeref<Kind: RefKind, Access: ThreadAccess> {
-    /// Returns a safe reference to the underlying object.
-    #[doc(hidden)]
-    fn impl_as_ref<T: GodotObject<RefKind = Kind>>(this: &Ref<T, Access>) -> TRef<'_, T, Access>;
-}
-
-/// Trait for persistent `Ref`s that point to valid objects. This is an internal interface.
-pub unsafe trait SafeAsRaw<Kind: RefKind, Access: ThreadAccess> {
-    /// Returns a raw reference to the underlying object.
-    #[doc(hidden)]
-    fn impl_as_raw<T: GodotObject<RefKind = Kind>>(this: &Ref<T, Access>) -> &RawObject<T>;
-}
-
-/// Struct to be used for various `Ref` trait bounds.
-pub struct RefImplBound {
-    _private: (),
-}
-
-unsafe impl SafeDeref<ManuallyManaged, Unique> for RefImplBound {
-    #[inline]
-    fn impl_as_ref<T: GodotObject<RefKind = ManuallyManaged>>(
-        this: &Ref<T, Unique>,
-    ) -> TRef<'_, T, Unique> {
-        unsafe { this.assume_safe_unchecked() }
-    }
-}
-
-unsafe impl<Access: LocalThreadAccess> SafeDeref<RefCounted, Access> for RefImplBound {
-    #[inline]
-    fn impl_as_ref<T: GodotObject<RefKind = RefCounted>>(
-        this: &Ref<T, Access>,
-    ) -> TRef<'_, T, Access> {
-        unsafe { this.assume_safe_unchecked() }
-    }
-}
-
-unsafe impl SafeAsRaw<ManuallyManaged, Unique> for RefImplBound {
-    #[inline]
-    fn impl_as_raw<T: GodotObject<RefKind = ManuallyManaged>>(
-        this: &Ref<T, Unique>,
-    ) -> &RawObject<T> {
-        unsafe { this.as_raw_unchecked() }
-    }
-}
-
-unsafe impl<Access: ThreadAccess> SafeAsRaw<RefCounted, Access> for RefImplBound {
-    #[inline]
-    fn impl_as_raw<T: GodotObject<RefKind = RefCounted>>(this: &Ref<T, Access>) -> &RawObject<T> {
-        unsafe { this.as_raw_unchecked() }
-    }
-}
-
-/// Specialization trait depending on `RefKind`. This is an internal interface.
-pub trait RefKindSpec: Sized {
-    /// Pointer wrapper that may be `Drop` or not.
-    #[doc(hidden)]
-    type PtrWrapper: PtrWrapper;
-
-    #[doc(hidden)]
-    unsafe fn impl_from_maybe_ref_counted<T: GodotObject<RefKind = Self>>(
-        ptr: NonNull<sys::godot_object>,
-    ) -> Option<Ref<T, Unique>>
-    where
-        Self: RefKind;
-
-    #[doc(hidden)]
-    unsafe fn impl_assume_safe<'a, T: GodotObject<RefKind = Self>>(
-        this: &Ref<T, Shared>,
-    ) -> TRef<'a, T, Shared>
-    where
-        Self: RefKind;
-
-    #[doc(hidden)]
-    unsafe fn impl_assume_unique<T: GodotObject<RefKind = Self>>(
-        this: Ref<T, Shared>,
-    ) -> Ref<T, Unique>
-    where
-        Self: RefKind;
-
-    #[doc(hidden)]
-    unsafe fn maybe_add_ref<T: GodotObject<RefKind = Self>>(raw: &RawObject<T>)
-    where
-        Self: RefKind;
-
-    #[doc(hidden)]
-    unsafe fn maybe_init_ref<T: GodotObject<RefKind = Self>>(raw: &RawObject<T>)
-    where
-        Self: RefKind;
-}
-
-impl RefKindSpec for ManuallyManaged {
-    type PtrWrapper = Forget;
-
-    #[inline(always)]
-    unsafe fn impl_from_maybe_ref_counted<T: GodotObject<RefKind = Self>>(
-        ptr: NonNull<sys::godot_object>,
-    ) -> Option<Ref<T, Unique>> {
-        if RawObject::<ReferenceCountedClassPlaceholder>::try_from_sys_ref(ptr).is_some() {
-            drop(Ref::<ReferenceCountedClassPlaceholder, Unique>::init_from_sys(ptr));
-            None
-        } else {
-            let obj = Ref::<ManuallyManagedClassPlaceholder, Unique>::init_from_sys(ptr);
-
-            if obj.as_raw().is_class::<T>() {
-                Some(obj.cast_unchecked())
-            } else {
-                obj.free();
-                None
-            }
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn impl_assume_safe<'a, T: GodotObject<RefKind = Self>>(
-        this: &Ref<T, Shared>,
-    ) -> TRef<'a, T, Shared> {
-        debug_assert!(
-            this.is_instance_sane(),
-            "assume_safe called on an invalid pointer"
-        );
-        this.assume_safe_unchecked()
-    }
-
-    #[inline(always)]
-    unsafe fn impl_assume_unique<T: GodotObject<RefKind = Self>>(
-        this: Ref<T, Shared>,
-    ) -> Ref<T, Unique> {
-        debug_assert!(
-            this.is_instance_sane(),
-            "assume_unique called on an invalid pointer"
-        );
-        this.cast_access()
-    }
-
-    #[inline]
-    unsafe fn maybe_add_ref<T: GodotObject<RefKind = Self>>(_raw: &RawObject<T>) {}
-    #[inline]
-    unsafe fn maybe_init_ref<T: GodotObject<RefKind = Self>>(_raw: &RawObject<T>) {}
-}
-
-impl RefKindSpec for RefCounted {
-    type PtrWrapper = UnRef;
-
-    #[inline(always)]
-    unsafe fn impl_from_maybe_ref_counted<T: GodotObject<RefKind = Self>>(
-        ptr: NonNull<sys::godot_object>,
-    ) -> Option<Ref<T, Unique>> {
-        if RawObject::<ReferenceCountedClassPlaceholder>::try_from_sys_ref(ptr).is_some() {
-            let obj = Ref::<ReferenceCountedClassPlaceholder, Unique>::init_from_sys(ptr);
-
-            if obj.as_raw().is_class::<T>() {
-                Some(obj.cast_unchecked())
-            } else {
-                None
-            }
-        } else {
-            RawObject::<ManuallyManagedClassPlaceholder>::from_sys_ref_unchecked(ptr).free();
-            None
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn impl_assume_safe<'a, T: GodotObject<RefKind = Self>>(
-        this: &Ref<T, Shared>,
-    ) -> TRef<'a, T, Shared> {
-        this.assume_safe_unchecked()
-    }
-
-    #[inline(always)]
-    unsafe fn impl_assume_unique<T: GodotObject<RefKind = Self>>(
-        this: Ref<T, Shared>,
-    ) -> Ref<T, Unique> {
-        this.cast_access()
-    }
-
-    #[inline]
-    unsafe fn maybe_add_ref<T: GodotObject<RefKind = Self>>(raw: &RawObject<T>) {
-        raw.add_ref();
-    }
-
-    #[inline]
-    unsafe fn maybe_init_ref<T: GodotObject<RefKind = Self>>(raw: &RawObject<T>) {
-        raw.init_ref_count();
-    }
-}
-
-/// Specialization trait for `Drop` behavior.
-pub trait PtrWrapper {
-    fn new(ptr: NonNull<sys::godot_object>) -> Self;
-    fn as_non_null(&self) -> NonNull<sys::godot_object>;
-
-    #[inline]
-    fn as_ptr(&self) -> *mut sys::godot_object {
-        self.as_non_null().as_ptr()
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct Forget(NonNull<sys::godot_object>);
-impl PtrWrapper for Forget {
-    #[inline]
-    fn new(ptr: NonNull<sys::godot_object>) -> Self {
-        Forget(ptr)
-    }
-
-    #[inline]
-    fn as_non_null(&self) -> NonNull<sys::godot_object> {
-        self.0
-    }
-}
-
-pub struct UnRef(NonNull<sys::godot_object>);
-impl PtrWrapper for UnRef {
-    #[inline]
-    fn new(ptr: NonNull<sys::godot_object>) -> Self {
-        UnRef(ptr)
-    }
-
-    #[inline]
-    fn as_non_null(&self) -> NonNull<sys::godot_object> {
-        self.0
-    }
-}
-impl Drop for UnRef {
-    #[inline]
-    fn drop(&mut self) {
-        unsafe {
-            let raw = RawObject::<ReferenceCountedClassPlaceholder>::from_sys_ref_unchecked(self.0);
-            raw.unref_and_free_if_last();
-        }
-    }
-}
-
-/// Trait for constraining `assume_safe` lifetimes to the one of `&self` when `T` is
-/// reference-counted. This is an internal interface.
-pub trait LifetimeConstraint<Kind: RefKind> {}
-
-/// Type used to check lifetime constraint depending on `RefKind`. Internal interface.
-#[doc(hidden)]
-pub struct AssumeSafeLifetime<'a, 'r> {
-    _marker: PhantomData<(&'a (), &'r ())>,
-}
-
-impl<'a, 'r> LifetimeConstraint<ManuallyManaged> for AssumeSafeLifetime<'a, 'r> {}
-impl<'a, 'r: 'a> LifetimeConstraint<RefCounted> for AssumeSafeLifetime<'a, 'r> {}
 
 mod private {
     pub trait Sealed {}

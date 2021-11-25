@@ -1,12 +1,12 @@
-use crate::core_types::typed_array::TypedArray;
+use crate::core_types::PoolArray;
 use crate::core_types::Vector2;
 
 /// A reference-counted vector of `Vector2` that uses Godot's pool allocator.
-pub type Vector2Array = TypedArray<Vector2>;
+pub type Vector2Array = PoolArray<Vector2>;
 
 godot_test!(
     test_vector2_array_access {
-        use crate::NewRef as _;
+        use crate::object::NewRef as _;
 
         let arr = Vector2Array::from_vec(vec![
             Vector2::new(1.0, 2.0),

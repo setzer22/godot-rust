@@ -4,16 +4,9 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use crate::core_types::{FromVariant, ToVariant, Variant};
-use crate::nativescript::user_data::UserData;
-use crate::nativescript::Map;
-use crate::nativescript::MapMut;
-use crate::nativescript::NativeClass;
-use crate::object::{GodotObject, RawObject};
-use crate::*;
-
-mod invalid;
-
-pub use self::invalid::{InvalidGetter, InvalidSetter};
+use crate::export::user_data::{Map, MapMut, UserData};
+use crate::export::NativeClass;
+use crate::object::{GodotObject, RawObject, TRef};
 
 /// Trait for raw property setters.
 ///

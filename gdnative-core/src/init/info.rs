@@ -1,27 +1,6 @@
 use crate::core_types::GodotString;
 
-pub struct TerminateInfo {
-    in_editor: bool,
-}
-
-impl TerminateInfo {
-    #[doc(hidden)]
-    #[inline]
-    pub unsafe fn new(options: *mut crate::sys::godot_gdnative_terminate_options) -> Self {
-        assert!(!options.is_null(), "options were NULL");
-
-        let crate::sys::godot_gdnative_terminate_options { in_editor } = *options;
-
-        Self { in_editor }
-    }
-
-    /// Returns `true` if the library is loaded in the Godot Editor.
-    #[inline]
-    pub fn in_editor(&self) -> bool {
-        self.in_editor
-    }
-}
-
+/// Context for the [`godot_gdnative_init`][crate::init::godot_gdnative_init] callback.
 pub struct InitializeInfo {
     in_editor: bool,
     active_library_path: GodotString,
@@ -43,11 +22,13 @@ impl InitializeInfo {
         &self.active_library_path
     }
 
+    /// Internal interface.
+    ///
     /// # Safety
     ///
-    /// Will `panic!()` if options is NULL or invalid.
-    #[doc(hidden)]
+    /// Will `panic!()` if options is NULL, UB if invalid.
     #[inline]
+    #[doc(hidden)]
     pub unsafe fn new(options: *mut crate::sys::godot_gdnative_init_options) -> Self {
         assert!(!options.is_null(), "options were NULL");
         let crate::sys::godot_gdnative_init_options {
@@ -56,8 +37,7 @@ impl InitializeInfo {
             ..
         } = *options;
 
-        let active_library_path =
-            crate::core_types::GodotString::clone_from_sys(*active_library_path);
+        let active_library_path = GodotString::clone_from_sys(*active_library_path);
 
         Self {
             in_editor,
@@ -89,5 +69,28 @@ impl InitializeInfo {
                 report_loading_error_fn(gd_native_library, message.as_ptr());
             }
         }
+    }
+}
+
+/// Context for the [`godot_gdnative_terminate`][crate::init::godot_gdnative_terminate] callback.
+pub struct TerminateInfo {
+    in_editor: bool,
+}
+
+impl TerminateInfo {
+    #[inline]
+    #[doc(hidden)] // avoids clippy warning: unsafe function's docs miss `# Safety` section
+    pub unsafe fn new(options: *mut crate::sys::godot_gdnative_terminate_options) -> Self {
+        assert!(!options.is_null(), "options were NULL");
+
+        let crate::sys::godot_gdnative_terminate_options { in_editor } = *options;
+
+        Self { in_editor }
+    }
+
+    /// Returns `true` if the library is loaded in the Godot Editor.
+    #[inline]
+    pub fn in_editor(&self) -> bool {
+        self.in_editor
     }
 }
