@@ -16,7 +16,7 @@ pub struct Transform {
 impl Default for Transform {
     #[inline]
     fn default() -> Self {
-        Self::identity()
+        Self::IDENTITY
     }
 }
 
@@ -35,20 +35,31 @@ impl Transform {
         unsafe { std::mem::transmute::<sys::godot_transform, Self>(c) }
     }
 
-    /// Creates a `Transform` with no scaling or rotation at `origin`.
+    pub const IDENTITY: Transform = Transform {
+        basis: Basis::identity(),
+        origin: Vector3::ZERO,
+    };
+
     #[inline]
-    pub fn translate(origin: Vector3) -> Transform {
-        Transform {
-            basis: Basis::identity(),
+    pub fn from_position(origin: Vector3) -> Transform {
+        Self {
             origin,
+            basis: Basis::default(),
         }
     }
 
+    /// Modifies this transform, by translating it along `translation`
     #[inline]
-    pub const fn identity() -> Transform {
-        Transform {
-            basis: Basis::identity(),
-            origin: Vector3::ZERO,
+    pub fn translate(&mut self, translation: Vector3) {
+        self.origin += translation
+    }
+
+    /// Returns this transform, with its origin moved by a certain `translation`
+    #[inline]
+    pub fn translated(&self, translation: Vector3) -> Transform {
+        Self {
+            origin: self.origin + translation,
+            basis: self.basis,
         }
     }
 
@@ -100,15 +111,15 @@ impl Transform {
     /// fully aligned to the target by a further rotation around an axis
     /// perpendicular to both the target and up vectors.
     #[inline]
-    pub fn looking_at(eye: Vector3, target: Vector3, up: Vector3) -> Transform {
+    pub fn looking_at(&self, target: Vector3, up: Vector3) -> Transform {
         let up = up.normalized();
-        let v_z = (eye - target).normalized();
+        let v_z = (self.origin - target).normalized();
         let v_x = up.cross(v_z);
         let v_y = v_z.cross(v_x);
 
         Transform {
             basis: Basis::from_elements([v_x, v_y, v_z]).transposed(),
-            origin: eye,
+            origin: self.origin,
         }
     }
 }
