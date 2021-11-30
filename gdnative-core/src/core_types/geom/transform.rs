@@ -43,7 +43,13 @@ impl Transform {
     };
 
     /// Creates a new transform from its three basis vectors and origin.
-    pub fn from_axis_origin(x_axis: Vector3, y_axis: Vector3, z_axis: Vector3, origin: Vector3) -> Self {
+    #[inline]
+    pub fn from_axis_origin(
+        x_axis: Vector3,
+        y_axis: Vector3,
+        z_axis: Vector3,
+        origin: Vector3,
+    ) -> Self {
         Self {
             origin,
             basis: Basis::from_elements([x_axis, y_axis, z_axis]),
