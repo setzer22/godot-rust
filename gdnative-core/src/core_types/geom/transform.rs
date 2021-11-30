@@ -1,3 +1,5 @@
+use std::ops::Mul;
+
 use crate::core_types::{Basis, Vector3};
 
 /// 3D Transformation (3x4 matrix) Using basis + origin representation.
@@ -40,18 +42,12 @@ impl Transform {
         origin: Vector3::ZERO,
     };
 
-    #[inline]
-    pub fn from_position(origin: Vector3) -> Transform {
+    /// Creates a new transform from its three basis vectors and origin.
+    pub fn from_axis_origin(x_axis: Vector3, y_axis: Vector3, z_axis: Vector3, origin: Vector3) -> Self {
         Self {
             origin,
-            basis: Basis::default(),
+            basis: Basis::from_elements([x_axis, y_axis, z_axis]),
         }
-    }
-
-    /// Modifies this transform, by translating it along `translation`
-    #[inline]
-    pub fn translate(&mut self, translation: Vector3) {
-        self.origin += translation
     }
 
     /// Returns this transform, with its origin moved by a certain `translation`
@@ -121,5 +117,15 @@ impl Transform {
             basis: Basis::from_elements([v_x, v_y, v_z]).transposed(),
             origin: self.origin,
         }
+    }
+}
+
+impl Mul<Transform> for Transform {
+    type Output = Transform;
+
+    fn mul(self, rhs: Transform) -> Self::Output {
+        let origin = self.xform(rhs.origin);
+        let basis = self.basis * rhs.basis;
+        Transform { origin, basis }
     }
 }
